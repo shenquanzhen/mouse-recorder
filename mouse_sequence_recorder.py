@@ -3,8 +3,10 @@ from pynput import keyboard, mouse
 import time
 from datetime import datetime
 import sys
+import signal
 import threading
 import json
+import select
 from enum import Enum
 
 class MouseAction(Enum):
@@ -74,8 +76,7 @@ class MouseRecorder:
         try:
             if key == keyboard.Key.esc or key == keyboard.Key.cmd or \
                key == keyboard.KeyCode.from_char('q'):
-                print("\n用户触发停止记录")
-                self.running = False
+                self._stop_recording()
                 return False
         except AttributeError:
             pass
@@ -115,6 +116,23 @@ class MouseRecorder:
             self.last_move_time = current_time
             self.last_move_position = current_position
 
+    def _stop_recording(self, signum=None, frame=None):
+        """统一的停止录制方法，可由信号、键盘监听或终端输入触发"""
+        if self.running:
+            print("\n用户触发停止记录")
+            self.running = False
+
+    def _stdin_watch_thread(self):
+        """监听终端回车键作为备用退出方式"""
+        while self.running:
+            try:
+                if select.select([sys.stdin], [], [], 0.5)[0]:
+                    sys.stdin.readline()
+                    self._stop_recording()
+                    return
+            except Exception:
+                return
+
     def record_positions(self):
         self.recorded_events = []
         self.running = True
@@ -122,6 +140,9 @@ class MouseRecorder:
         self.mouse_listener = None
         self.last_move_time = time.time()
         self.last_move_position = None
+
+        original_sigint = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, self._stop_recording)
         
         try:
             self.keyboard_listener = keyboard.Listener(on_press=self.on_keyboard_press)
@@ -133,6 +154,10 @@ class MouseRecorder:
             self.keyboard_listener.start()
             self.mouse_listener.start()
             
+            stdin_thread = threading.Thread(target=self._stdin_watch_thread)
+            stdin_thread.daemon = True
+            stdin_thread.start()
+
             coord_thread = threading.Thread(target=self.update_coordinate_display)
             coord_thread.daemon = True
             coord_thread.start()
@@ -146,15 +171,15 @@ class MouseRecorder:
             print("\n注意：")
             print("- 鼠标在任意位置停留3秒将自动记录该位置")
             print("- 所有点击操作都会被自动记录")
-            print("- 按ESC/Q/Command键结束记录")
+            print("- 按ESC/Q键结束记录，或在终端按回车/Ctrl+C结束记录")
             
-            # 等待用户按ESC/Q/Command结束记录
             while self.running:
                 time.sleep(0.5)
             
         except (KeyboardInterrupt, SystemExit):
-            pass
+            self.running = False
         finally:
+            signal.signal(signal.SIGINT, original_sigint)
             if self.keyboard_listener:
                 try:
                     self.keyboard_listener.stop()
@@ -249,7 +274,7 @@ class MouseRecorder:
     def run(self):
         print("鼠标操作记录和重放工具")
         print("注意: 将光标移动到屏幕左上角可以触发故障安全机制，终止程序")
-        print("按ESC键、Q键或Command键可以随时终止程序")
+        print("停止录制方式: ESC键/Q键 | 终端按回车 | Ctrl+C")
         
         try:
             # 确保开始新的记录前重置所有状态
@@ -296,11 +321,16 @@ class MouseRecorder:
         except (KeyboardInterrupt, SystemExit):
             pass
         finally:
-            # 确保程序结束时清理所有监听器
             if self.keyboard_listener:
-                self.keyboard_listener.stop()
+                try:
+                    self.keyboard_listener.stop()
+                except Exception:
+                    pass
             if self.mouse_listener:
-                self.mouse_listener.stop()
+                try:
+                    self.mouse_listener.stop()
+                except Exception:
+                    pass
             print("\n程序结束")
 
 if __name__ == "__main__":
