@@ -74,9 +74,9 @@ class MouseRecorder:
         try:
             if key == keyboard.Key.esc or key == keyboard.Key.cmd or \
                key == keyboard.KeyCode.from_char('q'):
-                print("\n用户触发退出操作")
+                print("\n用户触发停止记录")
                 self.running = False
-                sys.exit(0)
+                return False
         except AttributeError:
             pass
 
@@ -156,10 +156,16 @@ class MouseRecorder:
             pass
         finally:
             if self.keyboard_listener:
-                self.keyboard_listener.stop()
+                try:
+                    self.keyboard_listener.stop()
+                except Exception:
+                    pass
                 self.keyboard_listener = None
             if self.mouse_listener:
-                self.mouse_listener.stop()
+                try:
+                    self.mouse_listener.stop()
+                except Exception:
+                    pass
                 self.mouse_listener = None
             self.running = False
             return self.recorded_events
